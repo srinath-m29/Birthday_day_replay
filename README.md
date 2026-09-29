@@ -48,7 +48,7 @@ Birthday wishes are detected by keywords: birthday, bday, hbd, many more returns
 
 ## Limitations
 
-- The API only supports the standard ❤️ ("love") reaction. A white heart 🤍 cannot be sent.
+- The API only supports the standard ❤️ ("love") reaction. A white heart 🤍 can be sent.
 - Gender is a guess from the first name. Nicknames and stylised usernames can be wrong.
 - DM replies only work within 24 hours of the user's message.
 - Instagram has no comments on stories, so story mentions get a DM reply instead.
