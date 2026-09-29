@@ -1,0 +1,400 @@
+{
+  "name": "Instagram Birthday Auto Reply",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "instagram-birthday",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "n01",
+      "name": "IG Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "ig-birthday-verify"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "n02",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram-birthday",
+        "options": {}
+      },
+      "id": "n03",
+      "name": "IG Events (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "webhookId": "ig-birthday-events"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nconst bday = /(birth\\s?day|b['’]?day|bday|hbd|many\\s+more\\s+returns|🎂|🎉|🥳|🎈|🎁)/i;\n\nfor (const item of $input.all()) {\n  const body = item.json.body || item.json;\n  for (const entry of (body.entry || [])) {\n    const myId = entry.id;\n\n    // DMs and story mentions\n    for (const m of (entry.messaging || [])) {\n      if (!m.message || m.message.is_echo || m.sender.id === myId) continue;\n      const att = (m.message.attachments || []).find(a => a.type === 'story_mention');\n      if (att) {\n        out.push({ json: { type: 'story_mention', senderId: m.sender.id, messageId: m.message.mid, storyUrl: att.payload.url, text: '' } });\n        continue;\n      }\n      const text = m.message.text || '';\n      if (bday.test(text)) {\n        out.push({ json: { type: 'dm', senderId: m.sender.id, messageId: m.message.mid, text } });\n      }\n    }\n\n    // Comments on posts\n    for (const c of (entry.changes || [])) {\n      if (c.field !== 'comments') continue;\n      const v = c.value || {};\n      if (!v.from || v.from.id === myId || v.parent_id) continue;\n      if (bday.test(v.text || '')) {\n        out.push({ json: { type: 'comment', commentId: v.id, senderId: v.from.id, username: v.from.username, text: v.text } });\n      }\n    }\n  }\n}\nreturn out;"
+      },
+      "id": "n04",
+      "name": "Parse Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 240]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "accessToken",
+              "value": "PASTE_YOUR_INSTAGRAM_ACCESS_TOKEN",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "igUserId",
+              "value": "PASTE_YOUR_INSTAGRAM_BUSINESS_ACCOUNT_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "n05",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [480, 240]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.instagram.com/v23.0/{{ $json.senderId }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "fields", "value": "name,username" },
+            { "name": "access_token", "value": "={{ $json.accessToken }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n06",
+      "name": "Get Profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 240],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const orig = $('Config').item.json;\nconst prof = $json || {};\nconst full = ((prof.name || '').trim()) || orig.username || prof.username || '';\nlet first = full.split(/[\\s._\\d]+/).filter(Boolean)[0] || '';\nfirst = first.replace(/[^\\p{L}]/gu, '');\nreturn { json: { ...orig, firstName: first } };"
+      },
+      "id": "n07",
+      "name": "Extract First Name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 240]
+    },
+    {
+      "parameters": {
+        "url": "https://api.genderize.io",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "name", "value": "={{ $json.firstName }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n08",
+      "name": "Genderize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 240],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const orig = $('Extract First Name').item.json;\nconst g = $json.gender;\nconst p = $json.probability || 0;\nconst isMale = g === 'male' && p >= 0.6;\nreturn { json: { ...orig, gender: g || 'unknown', replyText: isMale ? 'Thank you da 😊' : 'Thank you 😊' } };"
+      },
+      "id": "n09",
+      "name": "Build Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 240]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "c1",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "dm",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "DM"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "c2",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "story_mention",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Story Mention"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  {
+                    "id": "c3",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "comment",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Comment"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n10",
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1680, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/v23.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $('Build Reply').item.json.accessToken }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient: { id: $('Build Reply').item.json.senderId }, sender_action: 'react', payload: { message_id: $('Build Reply').item.json.messageId, reaction: 'love' } }) }}",
+        "options": {}
+      },
+      "id": "n11",
+      "name": "React to Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 0],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/v23.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $('Build Reply').item.json.accessToken }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient: { id: $('Build Reply').item.json.senderId }, message: { text: $('Build Reply').item.json.replyText } }) }}",
+        "options": {}
+      },
+      "id": "n12",
+      "name": "Send DM Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/v23.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $json.accessToken }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ recipient: { id: $json.senderId }, message: { text: $json.replyText } }) }}",
+        "options": {}
+      },
+      "id": "n13",
+      "name": "Reply to Story Mention",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 240]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const orig = $('Build Reply').item.json;\nconst isVideo = /\\.mp4|video/i.test(orig.storyUrl || '');\nreturn { json: { ...orig, isVideo } };"
+      },
+      "id": "n14",
+      "name": "Prep Story Repost",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v23.0/{{ $json.igUserId }}/media",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $json.accessToken }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ media_type: 'STORIES' }, $json.isVideo ? { video_url: $json.storyUrl } : { image_url: $json.storyUrl })) }}",
+        "options": {}
+      },
+      "id": "n15",
+      "name": "Create Story Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 240]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "n16",
+      "name": "Wait for Processing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2680, 240],
+      "webhookId": "ig-birthday-wait"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v23.0/{{ $('Prep Story Repost').item.json.igUserId }}/media_publish",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $('Prep Story Repost').item.json.accessToken }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ creation_id: $('Create Story Container').item.json.id }) }}",
+        "options": {}
+      },
+      "id": "n17",
+      "name": "Publish Story",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2920, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v23.0/{{ $json.commentId }}/replies",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "={{ $json.accessToken }}" },
+            { "name": "message", "value": "={{ $json.replyText }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n18",
+      "name": "Reply to Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 480]
+    }
+  ],
+  "connections": {
+    "IG Verify (GET)": {
+      "main": [[{ "node": "Respond Challenge", "type": "main", "index": 0 }]]
+    },
+    "IG Events (POST)": {
+      "main": [[{ "node": "Parse Event", "type": "main", "index": 0 }]]
+    },
+    "Parse Event": {
+      "main": [[{ "node": "Config", "type": "main", "index": 0 }]]
+    },
+    "Config": {
+      "main": [[{ "node": "Get Profile", "type": "main", "index": 0 }]]
+    },
+    "Get Profile": {
+      "main": [[{ "node": "Extract First Name", "type": "main", "index": 0 }]]
+    },
+    "Extract First Name": {
+      "main": [[{ "node": "Genderize", "type": "main", "index": 0 }]]
+    },
+    "Genderize": {
+      "main": [[{ "node": "Build Reply", "type": "main", "index": 0 }]]
+    },
+    "Build Reply": {
+      "main": [[{ "node": "Route by Type", "type": "main", "index": 0 }]]
+    },
+    "Route by Type": {
+      "main": [
+        [{ "node": "React to Message", "type": "main", "index": 0 }],
+        [{ "node": "Reply to Story Mention", "type": "main", "index": 0 }],
+        [{ "node": "Reply to Comment", "type": "main", "index": 0 }]
+      ]
+    },
+    "React to Message": {
+      "main": [[{ "node": "Send DM Reply", "type": "main", "index": 0 }]]
+    },
+    "Reply to Story Mention": {
+      "main": [[{ "node": "Prep Story Repost", "type": "main", "index": 0 }]]
+    },
+    "Prep Story Repost": {
+      "main": [[{ "node": "Create Story Container", "type": "main", "index": 0 }]]
+    },
+    "Create Story Container": {
+      "main": [[{ "node": "Wait for Processing", "type": "main", "index": 0 }]]
+    },
+    "Wait for Processing": {
+      "main": [[{ "node": "Publish Story", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}
